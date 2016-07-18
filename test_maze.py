@@ -16,6 +16,7 @@ class Test_wetter_com(unittest.TestCase):
         assert(np.mod(self.maze.Nstates,10)==0)
 
     def test_statemapping(self):
+        # test 100 random position in the field for state mapping 
         for i in range(100):
             self.maze.x_position = np.random.uniform(low=0, high=2*self.maze.armX+self.maze.armY)
             self.maze.y_position = np.random.uniform(low=0, high=self.maze.armX+self.maze.armY)
