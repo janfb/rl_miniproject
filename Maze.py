@@ -35,11 +35,11 @@ class Maze:
         self.reward_at_target = 20.
         self.reward_at_wall   = -1.
         # the target area starts 20cm before the end of the left arm
-        self.targetAreaBegin = -35 #cm
+        self.targetAreaBegin = 20 #cm
         # the pickup area start 20cm before the end of the right arm
-        self.pickupAreaBegin = 35 #cm
+        self.pickupAreaBegin = 90 #cm
         # initialize pick up flag
-        self.alpha = False
+        self.alpha = 0
 
         # probability at which the agent chooses a random
         # action. This makes sure the agent explores the grid. It is close to
@@ -77,7 +77,7 @@ class Maze:
         # should be , i.e., 1, 2, 2.5, 5
         self.binSize = binSize # choose the size of a state in the maze: quadratic bin
         #self.Nstates = 3*self.armX*self.armY/(self.binSize**2) + 10*10/(self.binSize**2)
-        self.Nstates = (2*self.armX+self.armY)*(self.armX + self.armY)/self.binSize**2
+        self.Nstates = (2*self.armX+self.armY)*(self.armX + self.armY)/(self.binSize**2)
 
         # initialize state mat for postitio -> state mapping
         self.stateMat = np.reshape(np.arange(self.Nstates), ((self.armX + self.armY)/self.binSize, (2*self.armX+self.armY)/self.binSize))
@@ -110,27 +110,31 @@ class Maze:
         set stereotype x and y position in cm for every state in stateMat.
         """
         # build stereotype positions
-        x = np.arange(self.binSize/2, 2*self.armX + self.armY, self.binSize)
-        y = np.arange(self.binSize/2, self.armX + self.armY, self.binSize)
+        x = np.arange(self.binSize/2., 2*self.armX + self.armY, self.binSize)
+        y = np.arange(self.binSize/2., self.armX + self.armY, self.binSize)
         X1, X2 = np.meshgrid(x,y)
-        Z = np.dstack((X1, np.flipud(X2)))
+        Z = np.dstack((X1, X2))
         # get corresponding activities
         R = np.zeros((self.Nin, Z.shape[0], Z.shape[1]))
         for n in range(self.Nin):
-            R[n,] = np.exp(-((self.centers[n,0]-Z[:,:,0])**2
-                                      +(self.centers[n,1]-Z[:,:,1])**2)
-                                      /2*self.sigma**2)
+            R[n,] = np.exp(- ((self.centers[n,0] - Z[:,:,0])**2 + (self.centers[n,1] - Z[:,:,1])**2) / (2*self.sigma**2))
         return Z, R
 
-    def visualize_maze(self, plot=False):
+    def visualize_maze(self, plot=False, plot_Act = False, plot_Pos = False):
         """
         Scatter plot the place cell centers
         """
         plt.figure(figsize=(10,10))
         #  plt.scatter(0, 0, color='or')
         plt.scatter(self.centers[:,0], self.centers[:,1])
+        if plot_Act:
+            plt.imshow(np.repeat(np.repeat(self.stateAct.sum(axis = 0), 2, axis = 1), 2, axis = 0))
+            plt.gca().invert_yaxis()
+        if plot_Pos:
+            plt.scatter(self.statePos[...,0], self.statePos[...,1])
         plt.axis('equal')
         if plot: plt.show()
+
 
     def update_activity(self, x_pos=None, y_pos=None):
         """
@@ -144,6 +148,9 @@ class Maze:
                                     +(self.centers[:,1]-self.y_position)**2)
                                     /2*self.sigma**2)
 
+    def get_neurons_activity(locX, locY):
+        pass
+
     def _init_run(self):
         """
         Initialize the Q-values, eligibility trace, position etc.
@@ -153,7 +160,7 @@ class Maze:
 
         # initialize the Q-values and the eligibility trace
         self.Q = 0.01 * np.random.rand(self.Nstates, self.Nactions, 2) + 0.1
-        self.e = np.zeros((self.Nstates, self.Nactions, 2))
+        self.e = np.zeros((self.Nactions, self.Nin))
 
         # list that contains the times it took the agent to reach the target for all trials
         # serves to track the progress of learning
@@ -229,12 +236,13 @@ class Maze:
 
         # Update the Q-values
         # deltaQ = eta * e * [r - (Q_old - gamma * Q)]
-        Qold = self.Q[self.state, self.action_old, self.alpha]
+        Qold = self.Q[self.state_old, self.action_old, self.alpha_old]
         Qnew = self.Q[self.state, self.action, self.alpha]
-        deltaQ = self.eta * self.e * [self._reward() - (Qold - self.gamma*Qnew)]
+        tdiff = [self._reward() - (Qold - self.gamma*Qnew)]
+
 
         # update weights
-        self.w += self.eta * tdiff * self.e
+        self.w[:,:,self.alpha_old] += self.eta * tdiff * self.e
 
         # Update the Q-values
         self.Q = self.w.dot(self.r)
@@ -315,14 +323,24 @@ class Maze:
             self.y_position = self.y_position_old
 
         # update the state: the current bin
+        self.state_old = self.state
         self.state = self._get_state_from_pos()
+        self.alpha_old = self.alpha
+        self.alpha = self._picked_up()
 
-    def _get_state_from_pos(self):
+    def _get_state_from_pos(self, ):
         """
         get the state index given the current position of the animal
         :return : the state index
         """
-        return self.stateMat[int(self.y_position/self.binSize), int(self.x_position/self.binSize)]
+        row_index = int(self.stateMat.shape[0] - self.y_position/self.binSize)
+        col_index = int(self.x_position/self.binSize)
+        if self.y_position == 0:
+            row_index = self.stateMat.shape[0]-1
+        if self.x_position == 110:
+            col_index = self.stateMat.shape[1]-1
+
+        return self.stateMat[row_index, col_index]
 
     def _is_wall(self,x_position=None,y_position=None):
         """
@@ -341,10 +359,10 @@ class Maze:
         if (y_position < 0) or (y_position > self.armX+self.armY): # the agent is below the maze
             return True
         if(y_position < self.armX): # the agent is in the vertical arm
-            if x_position < -5 or x_position > 5:
+            if x_position < 50 or x_position > 60:
                 return True
-        if(y_position < self.armX): # the agent is in the horizontal arm
-            if x_position < -55 or x_position > 55:
+        if(y_position > self.armX): # the agent is in the horizontal arm
+            if x_position < 0 or x_position > 110:
                 return True
         # if none of the above is the case, this position is not a wall
         return False
