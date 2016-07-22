@@ -35,11 +35,11 @@ class Maze:
         self.reward_at_target = 20.
         self.reward_at_wall   = -1.
         # the target area starts 20cm before the end of the left arm
-        self.targetAreaBegin = -35 #cm
+        self.targetAreaBegin = 20 #cm
         # the pickup area start 20cm before the end of the right arm
-        self.pickupAreaBegin = 35 #cm
+        self.pickupAreaBegin = 90 #cm
         # initialize pick up flag
-        self.alpha = False
+        self.alpha = 0
 
         # probability at which the agent chooses a random
         # action. This makes sure the agent explores the grid. It is close to
@@ -77,7 +77,7 @@ class Maze:
         # should be , i.e., 1, 2, 2.5, 5
         self.binSize = binSize # choose the size of a state in the maze: quadratic bin
         #self.Nstates = 3*self.armX*self.armY/(self.binSize**2) + 10*10/(self.binSize**2)
-        self.Nstates = (2*self.armX+self.armY)*(self.armX + self.armY)/self.binSize**2
+        self.Nstates = (2*self.armX+self.armY)*(self.armX + self.armY)/(self.binSize**2)
 
         # initialize state mat for postitio -> state mapping
         self.stateMat = np.reshape(np.arange(self.Nstates), ((self.armX + self.armY)/self.binSize, (2*self.armX+self.armY)/self.binSize))
@@ -110,27 +110,31 @@ class Maze:
         set stereotype x and y position in cm for every state in stateMat.
         """
         # build stereotype positions
-        x = np.arange(self.binSize/2, 2*self.armX + self.armY, self.binSize)
-        y = np.arange(self.binSize/2, self.armX + self.armY, self.binSize)
+        x = np.arange(self.binSize/2., 2*self.armX + self.armY, self.binSize)
+        y = np.arange(self.binSize/2., self.armX + self.armY, self.binSize)
         X1, X2 = np.meshgrid(x,y)
-        Z = np.dstack((X1, np.flipud(X2)))
+        Z = np.dstack((X1, X2))
         # get corresponding activities
         R = np.zeros((self.Nin, Z.shape[0], Z.shape[1]))
         for n in range(self.Nin):
-            R[n,] = np.exp(-((self.centers[n,0]-Z[:,:,0])**2
-                                      +(self.centers[n,1]-Z[:,:,1])**2)
-                                      /2*self.sigma**2)
+            R[n,] = np.exp(- ((self.centers[n,0] - Z[:,:,0])**2 + (self.centers[n,1] - Z[:,:,1])**2) / (2*self.sigma**2))
         return Z, R
 
-    def visualize_maze(self, plot=False):
+    def visualize_maze(self, plot=False, plot_Act = False, plot_Pos = False):
         """
         Scatter plot the place cell centers
         """
         plt.figure(figsize=(10,10))
         #  plt.scatter(0, 0, color='or')
         plt.scatter(self.centers[:,0], self.centers[:,1])
+        if plot_Act:
+            plt.imshow(np.repeat(np.repeat(self.stateAct.sum(axis = 0), 2, axis = 1), 2, axis = 0))
+            plt.gca().invert_yaxis()
+        if plot_Pos:
+            plt.scatter(self.statePos[...,0], self.statePos[...,1])
         plt.axis('equal')
         if plot: plt.show()
+
 
     def update_activity(self, x_pos=None, y_pos=None):
         """
@@ -139,10 +143,26 @@ class Maze:
         # update activity of current phase, the other one is set to 0 (Kronecker Delta)
         self.r[:,0] = (self.alpha==0) * np.exp(-((self.centers[:,0]-self.x_position)**2
                                       +(self.centers[:,1]-self.y_position)**2)
-                                      /2*self.sigma**2)
+                                      /(2*self.sigma**2))
         self.r[:,1] = (self.alpha==1) * np.exp(-((self.centers[:,0]-self.x_position)**2
                                     +(self.centers[:,1]-self.y_position)**2)
-                                    /2*self.sigma**2)
+                                    /(2*self.sigma**2))
+
+    def get_neurons_activity(self, x_position=None, y_position=None):
+        """
+        Calculate the activity of the input neurons given a x-y position. If no
+        position is given, then the current position of the animal is used.
+        :param x_position: custom x position
+        :param y_position: custom y position
+        """
+        if x_position==None or y_position == None:
+            x_position = self.x_position
+            y_position = self.y_position
+
+        return np.exp(-((self.centers[:,0]-x_position)**2
+                                      +(self.centers[:,1]-y_position)**2)
+                                      /(2*self.sigma**2))
+
 
     def _init_run(self):
         """
@@ -152,8 +172,8 @@ class Maze:
         self.w = np.random.uniform(low=-1, high=1, size=(self.Nactions, self.Nin, 2))
 
         # initialize the Q-values and the eligibility trace
-        self.Q = 0.01 * np.random.rand(self.Nstates, self.Nactions, 2) + 0.1
-        self.e = np.zeros((self.Nstates, self.Nactions, 2))
+        self.Q = 0.01 * np.random.rand(self.Nactions, self.Nstates, 2) + 0.1
+        self.e = np.zeros((self.Nactions, self.Nin))
 
         # list that contains the times it took the agent to reach the target for all trials
         # serves to track the progress of learning
@@ -163,6 +183,7 @@ class Maze:
         self.x_position = None
         self.y_position = None
         self.action = None
+        self.state = None
 
     def run(self,N_trials=10,N_runs=1):
         self.latencies = np.zeros(N_trials)
@@ -200,8 +221,10 @@ class Maze:
         latency = 0.
 
         # Choose a the initial position at the bottom of the maze
-        self.x_position = self.y_position = 0
+        self.x_position = 55
+        self.y_position = 0
         self.state = self._get_state_from_pos()
+        self.alpha = False
 
         # make initial move
         self._choose_action()
@@ -223,30 +246,26 @@ class Maze:
         """
         Update the current estimate of the Q-values according to SARSA.
         """
-        # Update the eligibility trace
+        # Determine candidate weight change
         self.e *= self.gamma * self.lambda_eligibility # let all memories decay
-        self.e[self.action_old, :] += self.r[:, self.alpha] # strengthen current state memory
+        # strengthen current state memory
+        self.e[self.action_old, :] += self.get_neurons_activity(self.x_position_old, self.y_position_old)
 
-        # Update the Q-values
-        # deltaQ = eta * e * [r - (Q_old - gamma * Q)]
-        Qold = self.Q[self.state, self.action_old, self.alpha]
-        Qnew = self.Q[self.state, self.action, self.alpha]
-        deltaQ = self.eta * self.e * [self._reward() - (Qold - self.gamma*Qnew)]
+        # Get time difference of Qs
+        Qold = self.Q[self.action_old, self.state_old, self.alpha_old]
+        Qnew = self.Q[self.action, self.state, self.alpha]
+        tdiff = np.array([self._reward() - (Qold - self.gamma*Qnew)])
 
         # update weights
-        self.w += self.eta * tdiff * self.e
+        self.w[:,:,self.alpha_old] += self.eta * tdiff * self.e
 
-        # Update the Q-values
-        self.Q = self.w.dot(self.r)
+        # Update the Q-values: the sum over all neurons of the weighted activity over all possibble states
+        # NOTE: we assume that we want to update all states' Q-values of the current alpha
+        # the activty of all possible states has to be reshaped into 2D to match Q
+        allStatesActivity = np.reshape(self.stateAct, (self.stateAct.shape[0],
+                                    self.stateAct.shape[1]*self.stateAct.shape[2]))
+        self.Q[:,:,self.alpha_old] = (self.w[:,:,self.alpha_old].dot(allStatesActivity))
 
-        # Needed here:
-        # self.action, self.x_position, self.y_position, self._reward
-        # plus _old versions of above and more.
-
-        self.Q += deltaQ
-
-        # Finally we visualize the state if requested by calling code.
-        self._visualize_current_state()
     def _choose_action(self):
         """
         Choose the next action based on the current estimate of the Q-values.
@@ -257,7 +276,7 @@ class Maze:
         # Be sure to store the old action before choosing a new one.
         self.action_old = self.action
         # get greedy action as the index of the largest Q value at the current state
-        greedy_action = np.argmax(self.Q[self.state, :, self.alpha])
+        greedy_action = np.argmax(self.Q[:, self.state, self.alpha])
         # choose greedy action with prob 1-epsilon , choose random action else
         self.action = greedy_action if (1-self.epsilon) > np.random.rand(1)[0] else np.random.randint(self.Nactions)
 
@@ -268,6 +287,8 @@ class Maze:
         # if it has not picked up yet, check whether it arrived in the area
         if not(self.alpha):
             self.alpha = (self.x_position > self.pickupAreaBegin)
+        # else:
+        #     print("Picked up, heading to target...")
         return self.alpha
 
     def _arrived(self):
@@ -314,15 +335,28 @@ class Maze:
             self.x_position = self.x_position_old
             self.y_position = self.y_position_old
 
-        # update the state: the current bin
-        self.state = self._get_state_from_pos()
+        #print("Old ({}, {})".format(self.x_position_old, self.y_position_old))
+        #print("New ({}, {})".format(self.x_position, self.y_position))
 
-    def _get_state_from_pos(self):
+        # update the state: the current bin
+        self.state_old = self.state
+        self.state = self._get_state_from_pos()
+        self.alpha_old = self.alpha
+        self.alpha = self._picked_up()
+
+    def _get_state_from_pos(self, ):
         """
         get the state index given the current position of the animal
         :return : the state index
         """
-        return self.stateMat[int(self.y_position/self.binSize), int(self.x_position/self.binSize)]
+        row_index = int(self.stateMat.shape[0] - self.y_position/self.binSize)
+        col_index = int(self.x_position/self.binSize)
+        if self.y_position == 0:
+            row_index = self.stateMat.shape[0]-1
+        if self.x_position == 110:
+            col_index = self.stateMat.shape[1]-1
+
+        return self.stateMat[row_index, col_index]
 
     def _is_wall(self,x_position=None,y_position=None):
         """
@@ -341,34 +375,27 @@ class Maze:
         if (y_position < 0) or (y_position > self.armX+self.armY): # the agent is below the maze
             return True
         if(y_position < self.armX): # the agent is in the vertical arm
-            if x_position < -5 or x_position > 5:
+            if x_position < 50 or x_position > 60:
                 return True
-        if(y_position < self.armX): # the agent is in the horizontal arm
-            if x_position < -55 or x_position > 55:
+        if(y_position > self.armX): # the agent is in the horizontal arm
+            if x_position < 0 or x_position > 110:
                 return True
         # if none of the above is the case, this position is not a wall
         return False
 
-    def learning_curve(self,log=False,filter_t=1.):
+    def get_learning_curve(self, filter_t=1.):
         """
-        Show a running average of the time it takes the agent to reach the target location.
+        Calculate running average of the time it takes the agent to reach the target location.
 
         Options:
         filter_t=1. : timescale of the running average.
-        log    : Logarithmic y axis.
         """
-        plt.figure()
-        plt.xlabel('trials')
-        plt.ylabel('time to reach target')
         latencies = np.array(self.latency_list)
         # calculate a running average over the latencies with a averaging time 'filter_t'
         for i in range(1,latencies.shape[0]):
             latencies[i] = latencies[i-1] + (latencies[i] - latencies[i-1])/float(filter_t)
 
-        if not log:
-            plt.plot(self.latencies)
-        else:
-            plt.semilogy(self.latencies)
+        return self.latencies
 
     def navigation_map(self):
         """
