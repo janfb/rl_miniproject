@@ -10,7 +10,7 @@ class Test_Maze(unittest.TestCase):
     def test_geometry(self):
         print("Testing geometry")
         self.maze.sigma = .1
-        self.maze.visualize_maze(plot=False, plot_Pos=False)
+        self.maze.visualize_maze()
 
     def test_discretization(self):
         print("Testing discretization")
@@ -38,5 +38,9 @@ class Test_Maze(unittest.TestCase):
 
     def test_training(self):
         print("Testing Learning...")
-        self.maze.run(N_trials=10)
-        print(self.maze.get_learning_curve())
+        self.maze.run(N_trials=150)
+        plt.figure()
+        plt.plot((self.maze.get_learning_curve()))
+        plt.title("Latencies")
+        self.maze.plot_Q()
+        plt.show()

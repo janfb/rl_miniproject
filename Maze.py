@@ -35,11 +35,7 @@ class Maze:
         self.reward_at_target = 20.
         self.reward_at_wall   = -1.
         # the target area starts 20cm before the end of the left arm
-        self.targetAreaBegin = 20 #cm
-        # the pickup area start 20cm before the end of the right arm
-        self.pickupAreaBegin = 90 #cm
-        # initialize pick up flag
-        self.alpha = 0
+        self.targetAreaBegin = 90 #cm
 
         # probability at which the agent chooses a random
         # action. This makes sure the agent explores the grid. It is close to
@@ -71,7 +67,7 @@ class Maze:
 
         # initialize the output layer neurons
         self.Nactions = 4 # number of output layer neurons
-        self.directions = np.linspace(0, 2*np.pi, self.Nactions)
+        self.directions = np.arange(0, 2*np.pi, 2*np.pi/self.Nactions)
 
         # choose the discretization of the Tmaze
         # should be , i.e., 1, 2, 2.5, 5
@@ -120,33 +116,21 @@ class Maze:
             R[n,] = np.exp(- ((self.centers[n,0] - Z[:,:,0])**2 + (self.centers[n,1] - Z[:,:,1])**2) / (2*self.sigma**2))
         return Z, R
 
-    def visualize_maze(self, plot=False, plot_Act = False, plot_Pos = False):
+    def visualize_maze(self, plot_Maze=False, plot_Act = False, plot_Pos = False):
         """
         Scatter plot the place cell centers
         """
-        plt.figure(figsize=(10,10))
-        #  plt.scatter(0, 0, color='or')
-        plt.scatter(self.centers[:,0], self.centers[:,1])
+        if np.any((plot_Maze, plot_Act, plot_Pos)):
+            plt.figure(figsize=(10,10))
+            plt.axis('equal')
+        if plot_Maze:
+            plt.scatter(0, 0, color='or')
+            plt.scatter(self.centers[:,0], self.centers[:,1])
         if plot_Act:
             plt.imshow(np.repeat(np.repeat(self.stateAct.sum(axis = 0), 2, axis = 1), 2, axis = 0))
             plt.gca().invert_yaxis()
         if plot_Pos:
             plt.scatter(self.statePos[...,0], self.statePos[...,1])
-        plt.axis('equal')
-        if plot: plt.show()
-
-
-    def update_activity(self, x_pos=None, y_pos=None):
-        """
-        Update the input layer activity based in the current position of the agent
-        """
-        # update activity of current phase, the other one is set to 0 (Kronecker Delta)
-        self.r[:,0] = (self.alpha==0) * np.exp(-((self.centers[:,0]-self.x_position)**2
-                                      +(self.centers[:,1]-self.y_position)**2)
-                                      /(2*self.sigma**2))
-        self.r[:,1] = (self.alpha==1) * np.exp(-((self.centers[:,0]-self.x_position)**2
-                                    +(self.centers[:,1]-self.y_position)**2)
-                                    /(2*self.sigma**2))
 
     def get_neurons_activity(self, x_position=None, y_position=None):
         """
@@ -169,10 +153,10 @@ class Maze:
         Initialize the Q-values, eligibility trace, position etc.
         """
         # initialize weights
-        self.w = np.random.uniform(low=-1, high=1, size=(self.Nactions, self.Nin, 2))
+        self.w = np.random.uniform(low=-1, high=1, size=(self.Nactions, self.Nin))
 
         # initialize the Q-values and the eligibility trace
-        self.Q = 0.01 * np.random.rand(self.Nactions, self.Nstates, 2) + 0.1
+        self.Q = 0.01 * np.random.rand(self.Nactions, self.Nstates) + 0.1
         self.e = np.zeros((self.Nactions, self.Nin))
 
         # list that contains the times it took the agent to reach the target for all trials
@@ -224,7 +208,8 @@ class Maze:
         self.x_position = 55
         self.y_position = 0
         self.state = self._get_state_from_pos()
-        self.alpha = False
+        # let epsilon decay to smaller values: got from exploration to exploitation
+        self.epsilon *= 0.99
 
         # make initial move
         self._choose_action()
@@ -248,23 +233,23 @@ class Maze:
         """
         # Determine candidate weight change
         self.e *= self.gamma * self.lambda_eligibility # let all memories decay
-        # strengthen current state memory
         self.e[self.action_old, :] += self.get_neurons_activity(self.x_position_old, self.y_position_old)
 
         # Get time difference of Qs
-        Qold = self.Q[self.action_old, self.state_old, self.alpha_old]
-        Qnew = self.Q[self.action, self.state, self.alpha]
+        Qold = self.Q[self.action_old, self.state_old]
+        Qnew = self.Q[self.action, self.state]
         tdiff = np.array([self._reward() - (Qold - self.gamma*Qnew)])
 
         # update weights
-        self.w[:,:,self.alpha_old] += self.eta * tdiff * self.e
+        self.w[:,:] += self.eta * tdiff * self.e
 
         # Update the Q-values: the sum over all neurons of the weighted activity over all possibble states
-        # NOTE: we assume that we want to update all states' Q-values of the current alpha
+        # NOTE: we assume that we want to update all states' Q-values
         # the activty of all possible states has to be reshaped into 2D to match Q
         allStatesActivity = np.reshape(self.stateAct, (self.stateAct.shape[0],
                                     self.stateAct.shape[1]*self.stateAct.shape[2]))
-        self.Q[:,:,self.alpha_old] = (self.w[:,:,self.alpha_old].dot(allStatesActivity))
+        self.Q = (self.w.dot(allStatesActivity))
+
 
     def _choose_action(self):
         """
@@ -276,20 +261,9 @@ class Maze:
         # Be sure to store the old action before choosing a new one.
         self.action_old = self.action
         # get greedy action as the index of the largest Q value at the current state
-        greedy_action = np.argmax(self.Q[:, self.state, self.alpha])
+        greedy_action = np.argmax(self.Q[:, self.state])
         # choose greedy action with prob 1-epsilon , choose random action else
         self.action = greedy_action if (1-self.epsilon) > np.random.rand(1)[0] else np.random.randint(self.Nactions)
-
-    def _picked_up(self):
-        """
-        Check if the agent has visited the pick up area
-        """
-        # if it has not picked up yet, check whether it arrived in the area
-        if not(self.alpha):
-            self.alpha = (self.x_position > self.pickupAreaBegin)
-        # else:
-        #     print("Picked up, heading to target...")
-        return self.alpha
 
     def _arrived(self):
         """
@@ -297,7 +271,7 @@ class Maze:
         """
         # we only check the x coordinate because y is constant at the target area begin
         # rat needs
-        return (self.x_position < self.targetAreaBegin) and self.alpha
+        return (self.x_position > self.targetAreaBegin)
 
     def _reward(self):
         """
@@ -341,8 +315,6 @@ class Maze:
         # update the state: the current bin
         self.state_old = self.state
         self.state = self._get_state_from_pos()
-        self.alpha_old = self.alpha
-        self.alpha = self._picked_up()
 
     def _get_state_from_pos(self, ):
         """
@@ -351,9 +323,9 @@ class Maze:
         """
         row_index = int(self.stateMat.shape[0] - self.y_position/self.binSize)
         col_index = int(self.x_position/self.binSize)
-        if self.y_position == 0:
+        if np.isclose(self.y_position, 0):
             row_index = self.stateMat.shape[0]-1
-        if self.x_position == 110:
+        if self.x_position == (2*self.armX + self.armY):
             col_index = self.stateMat.shape[1]-1
 
         return self.stateMat[row_index, col_index]
@@ -435,12 +407,14 @@ class Maze:
         The figure consists of 4 subgraphs, each of which shows the Q-values
         colorcoded for one of the actions.
         """
+        # bring Q in the right shape
+        Q = np.reshape(self.Q, (self.Nactions, self.stateAct.shape[1], self.stateAct.shape[2]))
         if np.mod(np.sqrt(self.Nactions),1)==0:
             plt.figure()
             for i in range(self.Nactions):
                 plt.subplot(np.sqrt(self.Nactions),np.sqrt(self.Nactions),i+1)
-                plt.imshow(self.Q[:,:,i],interpolation='nearest',origin='lower',vmax=1.1)
-                plt.title('Action {}'.format(i+1))
+                plt.imshow(Q[i,:,:],interpolation='nearest',origin='lower',vmax=1.1)
+                plt.title('Action {}'.format(self.directions[i]))
                 plt.colorbar()
         else:
             print("No plotting possible because number of actions is not quadratic")
