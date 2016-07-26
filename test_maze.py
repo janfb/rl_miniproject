@@ -5,7 +5,7 @@ import numpy as np
 
 class Test_Maze(unittest.TestCase):
 
-    maze = Maze.Maze(binSize = 1)
+    maze = Maze.Maze(binSize = 2.5)
 
     def test_geometry(self):
         print("Testing geometry")
@@ -14,7 +14,7 @@ class Test_Maze(unittest.TestCase):
 
     def test_discretization(self):
         print("Testing discretization")
-        assert(np.mod(self.maze.Nstates,10)==0)
+        assert(np.mod(self.maze.Nstates,10)==0), "Number of states must be a multiple of 10"
 
     def test_statemapping(self):
         # test 100 random position in the field for state mapping
@@ -38,7 +38,7 @@ class Test_Maze(unittest.TestCase):
 
     def test_training(self):
         print("Testing Learning...")
-        self.maze.run(N_trials=150)
+        self.maze.run(N_trials=5)
         plt.figure()
         plt.plot((self.maze.get_learning_curve()))
         plt.title("Latencies")
