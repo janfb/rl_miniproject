@@ -1,3 +1,1 @@
-This is the readme for the MHBF reinforcement learning miniproject.
-
-Test if Sören can push.
+This is the readme for the MHBF reinforcement learning miniproject. Read the code, man! 
