@@ -5,7 +5,7 @@ import numpy as np
 
 class Test_Maze(unittest.TestCase):
 
-    maze = Maze.Maze(binSize = 2.5)
+    maze = Maze.Maze(binSize = 1)
 
     def test_geometry(self):
         print("Testing geometry")
@@ -38,7 +38,7 @@ class Test_Maze(unittest.TestCase):
 
     def test_training(self):
         print("Testing Learning...")
-        self.maze.run(N_trials=5)
+        self.maze.run(N_trials=100)
         plt.figure()
         plt.plot((self.maze.get_learning_curve()))
         plt.title("Latencies")

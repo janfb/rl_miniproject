@@ -18,7 +18,7 @@ class Maze:
                                     Q-value for all positions.
     """
 
-    def __init__(self, binSize=1, lambda_eligibility=0., epsilon=0.99):
+    def __init__(self, binSize=1, lambda_eligibility=0., epsilon=1):
         """
         Creates a T-maze with pickup and reward area
         """
@@ -43,7 +43,7 @@ class Maze:
         self.epsilon = epsilon
 
         # learning rate
-        self.eta = 0.1
+        self.eta = 0.01
 
         # discount factor - quantifies how far into the future
         # a reward is still considered important for the
@@ -63,7 +63,7 @@ class Maze:
         self.set_centers()
 
         # initialize the activity of the input layer neurons
-        self.r = np.zeros((self.Nin, 2)) # second idx is beta
+        self.rates = np.zeros(self.Nin)
 
         # initialize the output layer neurons
         self.Nactions = 4 # number of output layer neurons
@@ -132,31 +132,31 @@ class Maze:
         if plot_Pos:
             plt.scatter(self.statePos[...,0], self.statePos[...,1])
 
-    def get_neurons_activity(self, x_position=None, y_position=None):
+    def _update_rates(self, x_position=None, y_position=None):
         """
         Calculate the activity of the input neurons given a x-y position. If no
         position is given, then the current position of the animal is used.
         :param x_position: custom x position
         :param y_position: custom y position
+        :return rates: the rates of all input neurons, e.g., (64,)
         """
         if x_position==None or y_position == None:
             x_position = self.x_position
             y_position = self.y_position
 
-        return np.exp(-((self.centers[:,0]-x_position)**2
+        self.rates = np.exp(-((self.centers[:,0]-x_position)**2
                                       +(self.centers[:,1]-y_position)**2)
                                       /(2*self.sigma**2))
-
 
     def _init_run(self):
         """
         Initialize the Q-values, eligibility trace, position etc.
         """
         # initialize weights
-        self.w = np.random.uniform(low=-1, high=1, size=(self.Nactions, self.Nin))
+        self.w = np.random.normal(0, 0.1, size=(self.Nactions, self.Nin))
 
         # initialize the Q-values and the eligibility trace
-        self.Q = 0.01 * np.random.rand(self.Nactions, self.Nstates) + 0.1
+        self.Q = np.zeros((self.Nactions, self.Nstates))
         self.e = np.zeros((self.Nactions, self.Nin))
 
         # list that contains the times it took the agent to reach the target for all trials
@@ -168,6 +168,8 @@ class Maze:
         self.y_position = None
         self.action = None
         self.state = None
+        self.at_target = False
+        self.reward = 0
 
     def run(self,N_trials=10,N_runs=1):
         self.latencies = np.zeros(N_trials)
@@ -189,9 +191,10 @@ class Maze:
         a completely new simulation, call reset() before running it.
 
         """
-        for _ in range(N_trials):
+        for t in range(N_trials):
             # run a trial and store the time it takes to the target
             latency = self._run_trial()
+            print('Completed trial %s in %s steps with epsilon= %s'%(t, latency, self.epsilon))
             self.latency_list.append(latency)
 
         return np.array(self.latency_list)
@@ -205,51 +208,67 @@ class Maze:
         latency = 0.
 
         # Choose a the initial position at the bottom of the maze
-        self.x_position = 55
-        self.y_position = 0
+        self.x_position = 55.
+        self.y_position = 0.
         self.state = self._get_state_from_pos()
         # let epsilon decay to smaller values: got from exploration to exploitation
-        self.epsilon *= 0.99
+        if self.epsilon>0.1:
+            self.epsilon *= 0.99
 
         # make initial move
         self._choose_action()
         # Run the trial by choosing an action and repeatedly applying SARSA
         # until the reward has been reached.
         while not(self._arrived()):
-            # update state
+            # update state and reward
             self._update_state()
             # choose new action
             self._choose_action()
+            # update the weights
+            self._update_weights()
             # update Q-values
             self._update_Q()
             # count moves
             latency += 1
-
         return latency
+
+    def _update_weights(self):
+        '''
+        Updates weights according to SARSA and returns the resulting weights
+        '''
+        # Determine candidate weight change
+        self.e *= self.gamma * self.lambda_eligibility # let all memories decay
+        self.e[self.action_old, :] += self.rates
+
+        # NOTE: we use time difference w.r.t. weights here!
+        # get old and new Q values for time difference
+        #Qold = self.Q[self.action_old, int(self.state_old)]
+        #Qnew = self.Q[self.action, int(self.state)]
+        # use weights instead
+        # get nearest cell indices
+        cellIDX = self.get_nearestCell(self.x_position, self.y_position)
+        cellIDX_old = self.get_nearestCell(self.x_position_old, self.y_position_old)
+        Wold = self.w[self.action_old, cellIDX_old]
+        Wnew = self.w[self.action, cellIDX]
+        # calculate time difference
+        tdiff = np.array([self._get_reward() + self.gamma*Wnew - Wold])
+        # apply weight change
+        self.w += self.eta * tdiff * self.e
 
     def _update_Q(self):
         """
-        Update the current estimate of the Q-values according to SARSA.
+        Update the current estimate of the Q-values using the weights and basis functions.
         """
-        # Determine candidate weight change
-        self.e *= self.gamma * self.lambda_eligibility # let all memories decay
-        self.e[self.action_old, :] += self.get_neurons_activity(self.x_position_old, self.y_position_old)
+        # update firing rates
+        self._update_rates()
+        # NOTE: we update only the current state according to the curretn position
+        self.Q[:,self.state] = self.w.dot(self.rates)
 
-        # Get time difference of Qs
-        Qold = self.Q[self.action_old, self.state_old]
-        Qnew = self.Q[self.action, self.state]
-        tdiff = np.array([self._reward() - (Qold - self.gamma*Qnew)])
-
-        # update weights
-        self.w[:,:] += self.eta * tdiff * self.e
-
-        # Update the Q-values: the sum over all neurons of the weighted activity over all possibble states
-        # NOTE: we assume that we want to update all states' Q-values
-        # the activty of all possible states has to be reshaped into 2D to match Q
-        allStatesActivity = np.reshape(self.stateAct, (self.stateAct.shape[0],
-                                    self.stateAct.shape[1]*self.stateAct.shape[2]))
-        self.Q = (self.w.dot(allStatesActivity))
-
+    def get_nearestCell(self, x, y):
+        '''
+        Calculate the index of the place cell that is nearest to the given position.
+        '''
+        return np.argmin(np.linalg.norm(self.centers - np.array((x,y)), axis=1))
 
     def _choose_action(self):
         """
@@ -259,9 +278,9 @@ class Maze:
         a random action is chosen.
         """
         # Be sure to store the old action before choosing a new one.
-        self.action_old = self.action
+        self.action_old = np.copy(self.action)
         # get greedy action as the index of the largest Q value at the current state
-        greedy_action = np.argmax(self.Q[:, self.state])
+        greedy_action = np.argmax(self.Q[:, int(self.state)])
         # choose greedy action with prob 1-epsilon , choose random action else
         self.action = greedy_action if (1-self.epsilon) > np.random.rand(1)[0] else np.random.randint(self.Nactions)
 
@@ -273,34 +292,36 @@ class Maze:
         # rat needs
         return (self.x_position > self.targetAreaBegin)
 
-    def _reward(self):
+    def _get_reward(self):
         """
         Evaluates how much reward should be administered when performing the
         chosen action at the current location
         """
+        # default reward
+        self.reward = 0
+        # reward at target
         if self._arrived():
-            return self.reward_at_target
-
+            self.reward = self.reward_at_target
+        # reward at wall
         if self._wall_touch:
-            return self.reward_at_wall
-        else:
-            return 0.
+            self.reward = self.reward_at_wall
+        return self.reward
 
     def _update_state(self):
         """
         Update the state according to the old state and the current action.
         """
         # remember the old position of the agent
-        self.x_position_old = self.x_position
-        self.y_position_old = self.y_position
+        self.x_position_old = np.copy(self.x_position)
+        self.y_position_old = np.copy(self.y_position)
 
         # update the agents position according to the action
         # the stepsize has Gaussian noise
         stepsize = np.random.normal(loc=3, scale=1.5)
-        # the directions are given by the angle in the directions repertoire
+        # NOTE: the directions are given by the angle in the directions repertoire
         # by convention the animal looks in the direction of the T, i.e., the 0
-        # angle points upwards. That is why sine gives x and cosine gives y.
-        self.x_position += np.sin(self.directions[self.action])*stepsize
+        # angle points upwards or 'north'. That is why -sine gives x and cosine gives y.
+        self.x_position -= np.sin(self.directions[self.action])*stepsize
         self.y_position += np.cos(self.directions[self.action])*stepsize
 
         # check if the agent has bumped into a wall.
@@ -309,14 +330,11 @@ class Maze:
             self.x_position = self.x_position_old
             self.y_position = self.y_position_old
 
-        #print("Old ({}, {})".format(self.x_position_old, self.y_position_old))
-        #print("New ({}, {})".format(self.x_position, self.y_position))
-
         # update the state: the current bin
-        self.state_old = self.state
+        self.state_old = np.copy(self.state)
         self.state = self._get_state_from_pos()
 
-    def _get_state_from_pos(self, ):
+    def _get_state_from_pos(self):
         """
         get the state index given the current position of the animal
         :return : the state index
@@ -332,10 +350,7 @@ class Maze:
 
     def _is_wall(self,x_position=None,y_position=None):
         """
-        This function returns, if the given position is within an obstacle
-        If you want to put the obstacle somewhere else, this is what you have
-        to modify. The default is a wall that starts in the middle of the room
-        and ends at the right wall.
+        This function returns, if the given position is outside of the maze.
 
         If no position is given, the current position of the agent is evaluated.
         """
@@ -377,7 +392,7 @@ class Maze:
         self.x_direction = np.zeros((self.Nstates,self.Nstates))
         self.y_direction = np.zeros((self.Nstates,self.Nstates))
 
-        self.actions = np.argmax(self.Q[:,:,:],axis=2)
+        self.actions = np.argmax(self.Q,axis=-1)
         self.y_direction[self.actions==0] = 1.
         self.y_direction[self.actions==1] = -1.
         self.y_direction[self.actions==2] = 0.
@@ -407,14 +422,18 @@ class Maze:
         The figure consists of 4 subgraphs, each of which shows the Q-values
         colorcoded for one of the actions.
         """
-        # bring Q in the right shape
-        Q = np.reshape(self.Q, (self.Nactions, self.stateAct.shape[1], self.stateAct.shape[2]))
+        directionStr = ['North', 'East', 'South', 'West']
+        # bring Q in shape
+        all_rates = np.reshape(self.stateAct, (self.stateAct.shape[0],
+                                    self.stateAct.shape[1]*self.stateAct.shape[2]))
+        plottingQ = self.w.dot(all_rates)
+        Q = np.reshape(plottingQ, (self.Nactions, self.stateAct.shape[1], self.stateAct.shape[2]))
         if np.mod(np.sqrt(self.Nactions),1)==0:
             plt.figure()
             for i in range(self.Nactions):
                 plt.subplot(np.sqrt(self.Nactions),np.sqrt(self.Nactions),i+1)
                 plt.imshow(Q[i,:,:],interpolation='nearest',origin='lower',vmax=1.1)
-                plt.title('Action {}'.format(self.directions[i]))
+                plt.title(directionStr[i])
                 plt.colorbar()
         else:
             print("No plotting possible because number of actions is not quadratic")
