@@ -5,12 +5,14 @@ import numpy as np
 
 class Test_Maze(unittest.TestCase):
 
+
     maze = Maze.Maze(binSize = 1)
 
     def test_geometry(self):
         print("Testing geometry")
         self.maze.sigma = .1
         self.maze.visualize_maze()
+
 
     def test_discretization(self):
         print("Testing discretization")
@@ -24,6 +26,7 @@ class Test_Maze(unittest.TestCase):
             self.maze.action=0
             self.maze._update_state()
 
+
     def test_get_state_from_position(self):
         original_y = self.maze.y_position
         original_x = self.maze.x_position
@@ -31,16 +34,27 @@ class Test_Maze(unittest.TestCase):
         for y,x in zip([0, 30, 59.9],[59.9, 30, 0]):
             self.maze.y_position = y
             self.maze.x_position = x
+
             #print(" pos (y, x): ", y, ", ", x, ": ", self.maze._get_state_from_pos())
+
 
         self.maze.y_position = original_y
         self.maze.x_position = original_x
 
+
     def test_training(self):
         print("Testing Learning...")
+<<<<<<< HEAD
         self.maze.run(N_trials=100)
         plt.figure()
         plt.plot((self.maze.get_learning_curve()))
         plt.title("Latencies")
         self.maze.plot_Q()
         plt.show()
+=======
+        self.maze.run(N_trials=10)
+        print(self.maze.get_learning_curve())
+
+
+
+>>>>>>> bff14a1155c03dddadcd41c5365fbbf0908835b6
