@@ -1,5 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
 
 class Maze:
     """
@@ -27,15 +26,13 @@ class Maze:
         self.armX = 50
         self.armY = 10
 
-        # length of the pickup and reward area
-        self.area_length = 20
-
         # reward administered t the target location and when
         # bumping into walls
         self.reward_at_target = 20.
         self.reward_at_wall   = -1.
         # the target area starts 20cm before the end of the left arm
-        self.targetAreaBegin = 90 #cm
+        self.targetAreaBegin = 20 #cm
+        self.pickup_area_begin = 90
 
         # probability at which the agent chooses a random
         # action. This makes sure the agent explores the grid. It is close to
@@ -111,22 +108,6 @@ class Maze:
             R[n,] = np.exp(- ((self.centers[n,0] - Z[:,:,0])**2 + (self.centers[n,1] - Z[:,:,1])**2) / (2*self.sigma**2))
         return Z, R
 
-    def visualize_maze(self, plot_Maze=False, plot_Act = False, plot_Pos = False):
-        """
-        Scatter plot the place cell centers
-        """
-        if np.any((plot_Maze, plot_Act, plot_Pos)):
-            plt.figure(figsize=(10,10))
-            plt.axis('equal')
-        if plot_Maze:
-            plt.scatter(0, 0, color='or')
-            plt.scatter(self.centers[:,0], self.centers[:,1])
-        if plot_Act:
-            plt.imshow(np.repeat(np.repeat(self.stateAct.sum(axis = 0), 2, axis = 1), 2, axis = 0))
-            plt.gca().invert_yaxis()
-        if plot_Pos:
-            plt.scatter(self.statePos[...,0], self.statePos[...,1])
-
     def calculate_input_rates(self, x_position=None, y_position=None):
         """
         Calculate the activity of the input neurons given a x-y position. If no
@@ -148,9 +129,9 @@ class Maze:
         '''
         Calculates the ouput activity of the output layer neurons (q-values)
         '''
-        return self.w.dot(self.input_rates)
+        return self.w[self.alpha].dot(self.input_rates)
 
-    def update_activities(self):
+    def _update_activities(self):
         '''
         Updates the activities of the input and the output layer
         '''
@@ -164,17 +145,17 @@ class Maze:
         Initialize the Q-values, eligibility trace, position etc.
         """
         # initialize weights
-        self.w = np.random.rand(self.Nactions, self.Nin)
+        self.w = np.random.rand(2, self.Nactions, self.Nin)
+        self.alpha = 0
         # initialize the activity of the input layer neurons
         self.input_rates = self.calculate_input_rates(55, 0)
-
         self.input_rates_old = None
         self.output_rates = self.calculate_output_rates()
         self.output_rates_old = None
 
         # initialize the Q-values and the eligibility trace
         self.Q = np.zeros((self.Nactions))
-        self.e = np.zeros((self.Nactions, self.Nin))
+        self.e = np.zeros((2, self.Nactions, self.Nin))
         self.epsilon = 1
 
         # list that contains the times it took the agent to reach the target for all trials
@@ -207,7 +188,7 @@ class Maze:
         a completely new simulation, call reset() before running it.
 
         """
-        decay_factor = ((0.1)/self.epsilon) ** (1/N_trials)
+        decay_factor = ((0.1)/self.epsilon) ** (1/(0.7*N_trials))
         for t in range(N_trials):
             # run a trial and store the time it takes to the target
             latency = self._run_trial()
@@ -231,6 +212,7 @@ class Maze:
         # Choose a the initial position at the bottom of the maze
         self.x_position = 55.
         self.y_position = 0.
+        self.alpha = 0
 
         # make initial move
         self._choose_action()
@@ -240,7 +222,7 @@ class Maze:
             # update state
             self._update_state()
             self._choose_action()
-            self.update_activities()
+            self._update_activities()
             # update weights
             self._update_weights()
             # count moves
@@ -269,6 +251,7 @@ class Maze:
         # remember the old position of the agent
         self.x_position_old = self.x_position
         self.y_position_old = self.y_position
+        self.alpha_old = self.alpha
 
         # update the agents position according to the action
         # the stepsize has Gaussian noise
@@ -279,27 +262,26 @@ class Maze:
         self.x_position += np.sin(self.directions[self.action])*stepsize
         self.y_position += np.cos(self.directions[self.action])*stepsize
 
+        # calculate reward of the performed action
         self.reward = self._get_reward(self.x_position, self.y_position)
+
+        # check for pickup
+        if (self.alpha == 0 and self._in_pickup(self.x_position, self.y_position)):
+            self.alpha = 1
+
         # check if the agent has bumped into a wall.
         self._wall_touch = self._is_wall()
         if self._wall_touch:
             self.x_position = self.x_position_old
             self.y_position = self.y_position_old
 
-    def _get_Q(self, x, y):
-        """
-        Calculate output layer activity (Q-values) for given position (state)
-        """
-        # NOTE: we update only the current state according to the current position
-        return self.w.dot(self.get_rates(x,y))
-
     def _update_weights(self):
         '''
         Updates weights according to SARSA and returns the resulting weights
         '''
         # Determine candidate weight change
-        self.e *= self.gamma * self.lambda_eligibility # let all memories decay
-        self.e[self.action_old, :] += self.input_rates_old
+        self.e[self.alpha_old] *= self.gamma * self.lambda_eligibility # let all memories decay
+        self.e[self.alpha_old, self.action_old, :] += self.input_rates_old
 
         # get old and new Q values for time difference
         Qold = self.output_rates_old[self.action_old]
@@ -308,7 +290,7 @@ class Maze:
         tdiff = np.array([self.reward + self.gamma*Qnew - Qold])
 
         # apply weight change
-        self.w += self.eta * tdiff * self.e
+        self.w[self.alpha_old] += self.eta * tdiff * self.e[self.alpha_old]
 
     def _arrived(self):
         """
@@ -316,7 +298,16 @@ class Maze:
         """
         # we only check the x coordinate because y is constant at the target area begin
         # rat needs
-        return (self.x_position > self.targetAreaBegin)
+        return (self.x_position <= self.targetAreaBegin) and self.alpha
+
+    def _in_pickup(self, x, y):
+        """
+        Check for pickup
+        """
+        if self.alpha:
+            return 1
+        else:
+            return not(self._is_wall(x,y)) and (x >= self.pickup_area_begin)
 
     def _get_reward(self, x, y):
         """
@@ -332,20 +323,6 @@ class Maze:
         if self._is_wall(x, y):
             reward = self.reward_at_wall
         return reward
-
-    def _get_state_from_pos(self):
-        """
-        get the state index given the current position of the animal
-        :return : the state index
-        """
-        row_index = int(self.stateMat.shape[0] - self.y_position/self.binSize)
-        col_index = int(self.x_position/self.binSize)
-        if np.isclose(self.y_position, 0):
-            row_index = self.stateMat.shape[0]-1
-        if self.x_position == (2*self.armX + self.armY):
-            col_index = self.stateMat.shape[1]-1
-
-        return self.stateMat[row_index, col_index]
 
     def _is_wall(self,x_position=None,y_position=None):
         """
@@ -382,58 +359,3 @@ class Maze:
             latencies[i] = latencies[i-1] + (latencies[i] - latencies[i-1])/float(filter_t)
 
         return self.latencies
-
-    def navigation_map(self):
-        """
-        Plot the direction with the highest Q-value for every position.
-        Useful only for small gridworlds, otherwise the plot becomes messy.
-        """
-        self.x_direction = np.zeros((self.stateAct.shape[1],self.stateAct.shape[2]))
-        self.y_direction = np.zeros((self.stateAct.shape[1],self.stateAct.shape[2]))
-
-        # get the optimal action for all possible states
-        all_rates = np.reshape(self.stateAct, (self.stateAct.shape[0],
-                                    self.stateAct.shape[1]*self.stateAct.shape[2]))
-        Q = np.reshape(self.w.dot(all_rates), (self.Nactions, self.stateAct.shape[1], self.stateAct.shape[2]))
-        all_actions = np.argmax(Q, axis=0)
-        self.y_direction[all_actions==0] = 1.
-        self.y_direction[all_actions==2] = -1.
-
-        self.x_direction[all_actions==1] = 1.
-        self.x_direction[all_actions==3] = -1.
-
-        plt.figure()
-        plt.quiver(self.x_direction,self.y_direction)
-        plt.axis([-0.5, self.stateAct.shape[1] - 0.5, -0.5, self.stateAct.shape[2] - 0.5])
-
-    def reset(self):
-        """
-        Reset the Q-values (and the latency_list).
-
-        Instant amnesia -  the agent forgets everything he has learned before
-        """
-        self.w = np.random.rand((self.Nactions, self.Nin))
-        self.e = np.zeros((self.Nactions, self.Nin))
-        self.latency_list = []
-
-    def plot_Q(self):
-        """
-        Plot the dependence of the Q-values on position.
-        The figure consists of 4 subgraphs, each of which shows the Q-values
-        colorcoded for one of the actions.
-        """
-        directionStr = ['North', 'East', 'South', 'West']
-        # bring Q in shape
-        all_rates = np.reshape(self.stateAct, (self.stateAct.shape[0],
-                                    self.stateAct.shape[1]*self.stateAct.shape[2]))
-        plottingQ = self.w.dot(all_rates)
-        Q = np.reshape(plottingQ, (self.Nactions, self.stateAct.shape[1], self.stateAct.shape[2]))
-        if np.mod(np.sqrt(self.Nactions),1)==0:
-            plt.figure()
-            for i in range(self.Nactions):
-                plt.subplot(np.sqrt(self.Nactions),np.sqrt(self.Nactions),i+1)
-                plt.imshow(Q[i,:,:],interpolation='None',origin='lower',vmax=1.1)
-                plt.title(directionStr[i])
-                plt.colorbar()
-        else:
-            print("No plotting possible because number of actions is not quadratic")

@@ -30,11 +30,11 @@ class Test_Maze(unittest.TestCase):
 
     def test_training(self):
         print("Testing Learning...")
-        self.maze.run(N_trials=2000, N_runs=1, verbose=False)
+        self.maze.run(N_trials=3000, N_runs=1, verbose=False)
         plt.figure()
         plt.plot((self.maze.get_learning_curve()))
         plt.title("Latencies")
         self.maze.plot_Q()
         plt.show()
-        self.maze.navigation_map()
+        self.maze.navigation_map(alpha=0)
         plt.show()
