@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import Maze
 
-def navigation_map(maze):
+def navigation_map(maze, suffix=''):
     """
     Plot the direction with the highest Q-value for every place cells position.
     """
@@ -39,16 +39,18 @@ def navigation_map(maze):
     maze.x_direction_target[maze.preferred_actions[1]==3] = -1.
 
     plt.figure(figsize=(10,5))
+    plt.suptitle("Navigation Map", fontsize=20)
     plt.subplot(121)
-    plt.title("Navigation Map to pickup area, alpha=0")
+    plt.title("To pickup area, alpha=0")
     plt.quiver(maze.centers[:,0], maze.centers[:,1], maze.x_direction_pickup,maze.y_direction_pickup, color='b', alpha=.5, label = 'alpha = 0')
     plot_Tmaze()
     plt.axis([-5, 115, -5, 65])
     plt.subplot(122)
-    plt.title("Navigation Map to target area, alpha=1")
+    plt.title("To target area, alpha=1")
     plt.quiver(maze.centers[:,0], maze.centers[:,1], maze.x_direction_target,maze.y_direction_target, color='r', alpha=.5, label = 'alpha = 0')
     plot_Tmaze()
     plt.axis([-5, 115, -5, 65])
+    plt.savefig('figures/navigation_map' + suffix + '.png')
 
 def plot_Q(maze):
     """
@@ -121,7 +123,7 @@ def visualize_maze(maze, plot_Maze=False, plot_Act = False, plot_Pos = False):
     if plot_Pos:
         plt.scatter(maze.statePos[...,0], maze.statePos[...,1])
 
-def plot_learningCurve(maze):
+def plot_learningCurve(maze, suffix=''):
     '''
     Plots the learning curve, averaged over runs
     '''
@@ -131,11 +133,57 @@ def plot_learningCurve(maze):
     plt.xlabel("Trials")
     plt.ylabel("Escape latency")
     plt.title("Learning curve, averaged over runs")
+    plt.savefig('figures/learning_curve'+suffix+'.png')
 
+# initial analysis: 400 trials, 10 rats
 maze = Maze.Maze()
-maze.run(N_trials=400, N_runs=10, verbose=True)
-plot_learningCurve(maze)
-#plot_Q(maze)
-#plt.show()
+trials = 400
+runs = 10
+maze.run(N_trials=trials, N_runs=runs, verbose=False)
+plot_learningCurve(maze, suffix='t{}r{}'.format(trials, runs))
 navigation_map(maze)
-plt.show()
+#plt.show()
+
+# development of the navigation map over trials
+maze.run(N_trials=10, N_runs=1)
+navigation_map(maze, '_10trials')
+#plt.show()
+maze.run(N_trials=100, N_runs=1)
+navigation_map(maze, '_100trials')
+#plt.show()
+maze.run(N_trials=300, N_runs=1)
+navigation_map(maze, '_300trials')
+#plt.show()
+
+# how does the learning curve depend on lambda?
+maze.lambda_eligibility = 0
+maze.run(N_trials=400, N_runs=1)
+plot_learningCurve(maze, '_l0')
+#plt.show()
+maze.lambda_eligibility = .95
+maze.run(N_trials=400, N_runs=1)
+plot_learningCurve(maze, '_l095')
+#plt.show()
+
+# how does it depend on the number of actions?
+actions = [4, 6, 8]
+colors = ['r', 'g', 'b']
+trials = 250
+curves = np.zeros((len(actions), trials))
+plt.figure(figsize=(15,10))
+for i,a in enumerate(actions):
+    maze.Nactions = a
+    maze.run(N_trials=trials, N_runs=1)
+    curves[i] = np.array(maze.get_learning_curve())
+    plt.subplot(2,2,i+1)
+    plt.plot(curves[i])
+    plt.title('Nactions = {}'.format(a))
+    plt.xlabel('trials')
+    plt.ylabel('escape latency')
+plt.subplot(224)
+plt.plot(curves.mean(axis=1), 'o-', color='k')
+plt.title('Mean escapte latency over actions')
+plt.xlabel('Nactions')
+plt.ylabel('Mean escape latency')
+#plt.show()
+plt.savefig('figures/learning_curve_actions.png')

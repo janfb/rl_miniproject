@@ -59,7 +59,6 @@ class Maze:
 
         # initialize the output layer neurons
         self.Nactions = 4 # number of output layer neurons
-        self.directions = np.arange(0, 2*np.pi, 2*np.pi/self.Nactions)
 
         # choose the discretization of the Tmaze
         # should be , i.e., 1, 2, 2.5, 5
@@ -144,6 +143,8 @@ class Maze:
         """
         Initialize the Q-values, eligibility trace, position etc.
         """
+        # set direction array 
+        self.directions = np.arange(0, 2*np.pi, 2*np.pi/self.Nactions)
         # initialize weights
         self.w = np.random.rand(2, self.Nactions, self.Nin)
         self.alpha = 0
