@@ -30,7 +30,7 @@ class Test_Maze(unittest.TestCase):
 
     def test_training(self):
         print("Testing Learning...")
-        self.maze.run(N_trials=200, N_runs=5, verbose=False)
+        self.maze.run(N_trials=2000, N_runs=1, verbose=False)
         plt.figure()
         plt.plot((self.maze.get_learning_curve()))
         plt.title("Latencies")

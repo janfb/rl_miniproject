@@ -35,7 +35,7 @@ class Maze:
         self.reward_at_target = 20.
         self.reward_at_wall   = -1.
         # the target area starts 20cm before the end of the left arm
-        self.targetAreaBegin = 40 #cm
+        self.targetAreaBegin = 90 #cm
 
         # probability at which the agent chooses a random
         # action. This makes sure the agent explores the grid. It is close to
@@ -51,7 +51,7 @@ class Maze:
         self.gamma = 0.95
 
         # the decay factor for the eligibility trace
-        self.lambda_eligibility = 0.95
+        self.lambda_eligibility = 0.5
 
 
         # set up the place cells
@@ -59,9 +59,6 @@ class Maze:
         self.spacing = 5 # 5 cm spacing between the place cells
         self.Nin = 64 # number of input layer neurons
         self.set_centers()
-
-        # initialize the activity of the input layer neurons
-        self.rates = np.zeros(self.Nin)
 
         # initialize the output layer neurons
         self.Nactions = 4 # number of output layer neurons
@@ -130,7 +127,7 @@ class Maze:
         if plot_Pos:
             plt.scatter(self.statePos[...,0], self.statePos[...,1])
 
-    def get_rates(self, x_position=None, y_position=None):
+    def calculate_input_rates(self, x_position=None, y_position=None):
         """
         Calculate the activity of the input neurons given a x-y position. If no
         position is given, then the current position of the animal is used.
@@ -138,21 +135,42 @@ class Maze:
         :param y_position: custom y position
         :return rates: the rates of all input neurons, e.g., (64,)
         """
-        if x_position==None or y_position == None:
+        if x_position==None or y_position==None:
             x_position = self.x_position
             y_position = self.y_position
 
-        self.rates = np.exp(-((self.centers[:,0]-x_position)**2
+        rates = np.exp(-((self.centers[:,0]-x_position)**2
                                       +(self.centers[:,1]-y_position)**2)
                                       /(2*self.sigma**2))
-        return self.rates
+        return rates
+
+    def calculate_output_rates(self):
+        '''
+        Calculates the ouput activity of the output layer neurons (q-values)
+        '''
+        return self.w.dot(self.input_rates)
+
+    def update_activities(self):
+        '''
+        Updates the activities of the input and the output layer
+        '''
+        self.input_rates_old = np.copy(self.input_rates)
+        self.output_rates_old = np.copy(self.output_rates)
+        self.input_rates = self.calculate_input_rates(self.x_position, self.y_position)
+        self.output_rates = self.calculate_output_rates()
 
     def _init_run(self):
         """
         Initialize the Q-values, eligibility trace, position etc.
         """
         # initialize weights
-        self.w = np.zeros((self.Nactions, self.Nin))
+        self.w = np.random.rand(self.Nactions, self.Nin)
+        # initialize the activity of the input layer neurons
+        self.input_rates = self.calculate_input_rates(55, 0)
+
+        self.input_rates_old = None
+        self.output_rates = self.calculate_output_rates()
+        self.output_rates_old = None
 
         # initialize the Q-values and the eligibility trace
         self.Q = np.zeros((self.Nactions))
@@ -171,8 +189,9 @@ class Maze:
     def run(self,N_trials=10,N_runs=1, verbose=False):
         self.latencies = np.zeros(N_trials)
 
-        for _ in range(N_runs):
+        for r in range(N_runs):
             self._init_run()
+            print("RUN %s"%r)
             latencies = self._learn_run(N_trials=N_trials, verbose=verbose)
             self.latencies += latencies/N_runs
 
@@ -188,16 +207,15 @@ class Maze:
         a completely new simulation, call reset() before running it.
 
         """
-        epsilon_trace = np.zeros(N_trials)
-        epsilon_trace[:int(0.8*N_trials)] = np.linspace(self.epsilon, 0.1, int(0.8 * N_trials))
-        epsilon_trace[int(0.8*N_trials):] = 0.1
+        decay_factor = ((0.1)/self.epsilon) ** (1/N_trials)
         for t in range(N_trials):
             # run a trial and store the time it takes to the target
             latency = self._run_trial()
             if verbose:
                 print('Finished trial %s in %s steps with epsilon= %.4s'%(t, latency, self.epsilon))
             # let epsilon decay exponentially to 0.1
-            self.epsilon = epsilon_trace[t]
+            if self.epsilon>0.1:
+                self.epsilon *= decay_factor
             self.latency_list.append(latency)
 
         return np.array(self.latency_list)
@@ -220,9 +238,9 @@ class Maze:
         # until the reward has been reached.
         while not(self._arrived()):
             # update state
-            self._perform_action()
-            # choose new action
+            self._update_state()
             self._choose_action()
+            self.update_activities()
             # update weights
             self._update_weights()
             # count moves
@@ -237,19 +255,20 @@ class Maze:
         a random action is chosen.
         """
         # Be sure to store the old action before choosing a new one.
-        self.action_old = np.copy(self.action)
+        self.action_old = self.action
         # get greedy action as the index of the largest Q value at the current state
-        greedy_action = np.argmax(self._get_Q(self.x_position, self.y_position))
-        # choose greedy action with prob 1-epsilon , choose random action else
-        self.action = greedy_action if (1-self.epsilon) > np.random.rand(1)[0] else np.random.randint(self.Nactions)
+        if np.random.random_sample() > self.epsilon:
+            self.action = self.output_rates.argmax()
+        else:
+            self.action = np.random.randint(0, self.output_rates.size)
 
-    def _perform_action(self):
+    def _update_state(self):
         """
         Update the state according to the old state and the current action.
         """
         # remember the old position of the agent
-        self.x_position_old = np.copy(self.x_position)
-        self.y_position_old = np.copy(self.y_position)
+        self.x_position_old = self.x_position
+        self.y_position_old = self.y_position
 
         # update the agents position according to the action
         # the stepsize has Gaussian noise
@@ -260,6 +279,7 @@ class Maze:
         self.x_position += np.sin(self.directions[self.action])*stepsize
         self.y_position += np.cos(self.directions[self.action])*stepsize
 
+        self.reward = self._get_reward(self.x_position, self.y_position)
         # check if the agent has bumped into a wall.
         self._wall_touch = self._is_wall()
         if self._wall_touch:
@@ -279,13 +299,14 @@ class Maze:
         '''
         # Determine candidate weight change
         self.e *= self.gamma * self.lambda_eligibility # let all memories decay
-        self.e[self.action_old, :] += self.get_rates(self.x_position_old, self.y_position_old)
+        self.e[self.action_old, :] += self.input_rates_old
 
         # get old and new Q values for time difference
-        Qold = self._get_Q(self.x_position_old, self.y_position_old)[self.action_old]
-        Qnew = self._get_Q(self.x_position, self.y_position)[self.action]
+        Qold = self.output_rates_old[self.action_old]
+        Qnew = self.output_rates[self.action]
         # calculate time difference
-        tdiff = np.array([self._get_reward() + self.gamma*Qnew - Qold])
+        tdiff = np.array([self.reward + self.gamma*Qnew - Qold])
+
         # apply weight change
         self.w += self.eta * tdiff * self.e
 
@@ -295,22 +316,22 @@ class Maze:
         """
         # we only check the x coordinate because y is constant at the target area begin
         # rat needs
-        return (self.y_position > self.targetAreaBegin)
+        return (self.x_position > self.targetAreaBegin)
 
-    def _get_reward(self):
+    def _get_reward(self, x, y):
         """
         Evaluates how much reward should be administered when performing the
         chosen action at the current location
         """
         # default reward
-        self.reward = 0
+        reward = 0
         # reward at target
         if self._arrived():
-            self.reward = self.reward_at_target
+            reward = self.reward_at_target
         # reward at wall
-        if self._wall_touch:
-            self.reward = self.reward_at_wall
-        return self.reward
+        if self._is_wall(x, y):
+            reward = self.reward_at_wall
+        return reward
 
     def _get_state_from_pos(self):
         """
@@ -391,7 +412,8 @@ class Maze:
 
         Instant amnesia -  the agent forgets everything he has learned before
         """
-        self.Q = 0.01 * np.random.rand(self.Nstates, self.Nstates, self.Nactions) + 0.1
+        self.w = np.random.rand((self.Nactions, self.Nin))
+        self.e = np.zeros((self.Nactions, self.Nin))
         self.latency_list = []
 
     def plot_Q(self):
