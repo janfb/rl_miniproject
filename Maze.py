@@ -155,7 +155,7 @@ class Maze:
 
         # initialize the Q-values and the eligibility trace
         self.Q = np.zeros((self.Nactions))
-        self.e = np.zeros((2, self.Nactions, self.Nin))
+        self.e = np.zeros((self.Nactions, self.Nin))
         self.epsilon = 1
 
         # list that contains the times it took the agent to reach the target for all trials
@@ -280,8 +280,8 @@ class Maze:
         Updates weights according to SARSA and returns the resulting weights
         '''
         # Determine candidate weight change
-        self.e[self.alpha_old] *= self.gamma * self.lambda_eligibility # let all memories decay
-        self.e[self.alpha_old, self.action_old, :] += self.input_rates_old
+        self.e *= self.gamma * self.lambda_eligibility # let all memories decay
+        self.e[self.action_old, :] += self.input_rates_old
 
         # get old and new Q values for time difference
         Qold = self.output_rates_old[self.action_old]
@@ -290,7 +290,7 @@ class Maze:
         tdiff = np.array([self.reward + self.gamma*Qnew - Qold])
 
         # apply weight change
-        self.w[self.alpha_old] += self.eta * tdiff * self.e[self.alpha_old]
+        self.w[self.alpha_old] += self.eta * tdiff * self.e
 
     def _arrived(self):
         """

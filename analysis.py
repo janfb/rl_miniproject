@@ -17,8 +17,8 @@ def navigation_map(maze):
     maze.y_direction_target = np.zeros(maze.Nin)
 
     maze.preferred_actions = np.zeros((2,maze.Nin))
-    for alpha in range(maze.preferred_actions.shape[0]):
-        for cell in range(maze.preferred_actions.shape[1]):
+    for alpha in range(2):
+        for cell in range(maze.Nin):
             # get input rates for cell centers
             rates = maze.calculate_input_rates(maze.centers[cell,0], maze.centers[cell,1])
             # get corresponding output rates
@@ -32,22 +32,22 @@ def navigation_map(maze):
     maze.x_direction_pickup[maze.preferred_actions[0]==1] = 1.
     maze.x_direction_pickup[maze.preferred_actions[0]==3] = -1.
 
-    maze.y_direction_target[maze.preferred_actions[0]==0] = 1.
-    maze.y_direction_target[maze.preferred_actions[0]==2] = -1.
+    maze.y_direction_target[maze.preferred_actions[1]==0] = 1.
+    maze.y_direction_target[maze.preferred_actions[1]==2] = -1.
 
-    maze.x_direction_target[maze.preferred_actions[0]==1] = 1.
-    maze.x_direction_target[maze.preferred_actions[0]==3] = -1.
+    maze.x_direction_target[maze.preferred_actions[1]==1] = 1.
+    maze.x_direction_target[maze.preferred_actions[1]==3] = -1.
 
     plt.figure(figsize=(10,5))
     plt.subplot(121)
     plt.title("Navigation Map to pickup area, alpha=0")
     plt.quiver(maze.centers[:,0], maze.centers[:,1], maze.x_direction_pickup,maze.y_direction_pickup, color='b', alpha=.5, label = 'alpha = 0')
-    maze.plot_Tmaze()
+    plot_Tmaze()
     plt.axis([-5, 115, -5, 65])
     plt.subplot(122)
     plt.title("Navigation Map to target area, alpha=1")
     plt.quiver(maze.centers[:,0], maze.centers[:,1], maze.x_direction_target,maze.y_direction_target, color='r', alpha=.5, label = 'alpha = 0')
-    maze.plot_Tmaze()
+    plot_Tmaze()
     plt.axis([-5, 115, -5, 65])
 
 def plot_Q(maze):
@@ -71,7 +71,7 @@ def plot_Q(maze):
         im = plt.imshow(Q0[i,:,:],interpolation='None',origin='lower', vmin=minval, vmax=maxval)
         plt.title(directionStr[i]+ ' to pickup')
         plt.colorbar(im, fraction = 0.045)
-        maze.plot_Tmaze()
+        plot_Tmaze()
     minval = Q1.min()
     maxval = Q1.max()
     for i in range(maze.Nactions):
@@ -79,7 +79,7 @@ def plot_Q(maze):
         im = plt.imshow(Q1[i,:,:],interpolation='None',origin='lower', vmin=minval, vmax=maxval)
         plt.title(directionStr[i]+ ' to target')
         plt.colorbar(im, fraction = 0.045)
-        maze.plot_Tmaze()
+        plot_Tmaze()
 
 def plot_Tmaze():
     '''
@@ -121,7 +121,21 @@ def visualize_maze(maze, plot_Maze=False, plot_Act = False, plot_Pos = False):
     if plot_Pos:
         plt.scatter(maze.statePos[...,0], maze.statePos[...,1])
 
+def plot_learningCurve(maze):
+    '''
+    Plots the learning curve, averaged over runs
+    '''
+    learning_curve = maze.get_learning_curve()
+    plt.figure(figsize=(10,5))
+    plt.plot(learning_curve)
+    plt.xlabel("Trials")
+    plt.ylabel("Escape latency")
+    plt.title("Learning curve, averaged over runs")
+
 maze = Maze.Maze()
-maze.run(N_trials=100, N_runs=10)
-plot_Q(maze)
+maze.run(N_trials=400, N_runs=10, verbose=True)
+plot_learningCurve(maze)
+#plot_Q(maze)
+#plt.show()
 navigation_map(maze)
+plt.show()
