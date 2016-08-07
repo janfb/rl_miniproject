@@ -7,17 +7,13 @@ class Maze:
     Methods:
 
     set_centers()              : Set the centers of the place fiels
-    visualize_maze()           : Scatter plot the place field centers
-    update_activity()          : update the activity of the input layer neurons
-    reset()                    : Make the agent forget everything he has learned.
-    plot_Q()                   : Plot of the Q-values .
-    learning_curve()           : Plot the time it takes the agent to reach the target
-                                    as a function of trial number.
-    navigation_map()           : Plot the movement direction with the highest
-                                    Q-value for all positions.
+    calculate_input_rates()    : calculates firing rates of input layer neurons
+    calculate_output_rates()   : calculates firing rates of output layer neurons (Q-values)
+    get_learning_curve()       : returns a list of trial latencies, averaged over runs
+    run()                      : let the agent learn a given number of runs with a given number of trials
     """
 
-    def __init__(self, binSize=1):
+    def __init__(self, binSize=1, Nactions=4, lambda_=0.4):
         """
         Creates a T-maze with pickup and reward area
         """
@@ -48,7 +44,7 @@ class Maze:
         self.gamma = 0.95
 
         # the decay factor for the eligibility trace
-        self.lambda_eligibility = 0.5
+        self.lambda_eligibility = lambda_
 
 
         # set up the place cells
@@ -58,19 +54,7 @@ class Maze:
         self.set_centers()
 
         # initialize the output layer neurons
-        self.Nactions = 4 # number of output layer neurons
-
-        # choose the discretization of the Tmaze
-        # should be , i.e., 1, 2, 2.5, 5
-        self.binSize = binSize # choose the size of a state in the maze: quadratic bin
-        #self.Nstates = 3*self.armX*self.armY/(self.binSize**2) + 10*10/(self.binSize**2)
-        self.Nstates = (2*self.armX+self.armY)*(self.armX + self.armY)/(self.binSize**2)
-
-        # initialize state mat for postitio -> state mapping
-        self.stateMat = np.reshape(np.arange(self.Nstates), ((self.armX + self.armY)/self.binSize, (2*self.armX+self.armY)/self.binSize))
-        # build stereotype state positions in cm and corresponding activity of
-        # input neurons
-        self.statePos, self.stateAct = self._build_statePos()
+        self.Nactions = Nactions # number of output layer neurons
 
         # initialize the Q-values etc.
         self._init_run()
@@ -91,21 +75,6 @@ class Maze:
         # left arm with target area
         self.centers[44:64, 0] = np.repeat(np.arange(2.5, self.centers[20,0], self.spacing)[::-1],2)
         self.centers[44:64, 1] = np.tile([self.centers[20,1], self.centers[22,1]], 10)
-
-    def _build_statePos(self):
-        """
-        set stereotype x and y position in cm for every state in stateMat.
-        """
-        # build stereotype positions
-        x = np.arange(self.binSize/2., 2*self.armX + self.armY, self.binSize)
-        y = np.arange(self.binSize/2., self.armX + self.armY, self.binSize)
-        X1, X2 = np.meshgrid(x,y)
-        Z = np.dstack((X1, X2))
-        # get corresponding activities
-        R = np.zeros((self.Nin, Z.shape[0], Z.shape[1]))
-        for n in range(self.Nin):
-            R[n,] = np.exp(- ((self.centers[n,0] - Z[:,:,0])**2 + (self.centers[n,1] - Z[:,:,1])**2) / (2*self.sigma**2))
-        return Z, R
 
     def calculate_input_rates(self, x_position=None, y_position=None):
         """
@@ -143,7 +112,7 @@ class Maze:
         """
         Initialize the Q-values, eligibility trace, position etc.
         """
-        # set direction array 
+        # set direction array
         self.directions = np.arange(0, 2*np.pi, 2*np.pi/self.Nactions)
         # initialize weights
         self.w = np.random.rand(2, self.Nactions, self.Nin)
