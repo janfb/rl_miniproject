@@ -9,22 +9,12 @@ class Test_Maze(unittest.TestCase):
     maze = Maze.Maze(binSize = 1)
 
     def test_geometry(self):
-        print("Testing geometry")
         self.maze.sigma = .1
-        self.maze.visualize_maze(plot=False, plot_Pos=False)
+        self.maze.visualize_maze()
 
 
     def test_discretization(self):
-        print("Testing discretization")
-        assert(np.mod(self.maze.Nstates,10)==0)
-
-    def test_statemapping(self):
-        # test 100 random position in the field for state mapping
-        for i in range(100):
-            self.maze.x_position = np.random.uniform(low=0, high=2*self.maze.armX+self.maze.armY)
-            self.maze.y_position = np.random.uniform(low=0, high=self.maze.armX+self.maze.armY)
-            self.maze.action=0
-            self.maze._update_state()
+        assert(np.mod(self.maze.Nstates,10)==0), "Number of states must be a multiple of 10"
 
 
     def test_get_state_from_position(self):
@@ -35,17 +25,16 @@ class Test_Maze(unittest.TestCase):
             self.maze.y_position = y
             self.maze.x_position = x
 
-            #print(" pos (y, x): ", y, ", ", x, ": ", self.maze._get_state_from_pos())
-
-
         self.maze.y_position = original_y
         self.maze.x_position = original_x
 
-
     def test_training(self):
         print("Testing Learning...")
-        self.maze.run(N_trials=10)
-        print(self.maze.get_learning_curve())
-
-
-
+        self.maze.run(N_trials=3000, N_runs=1, verbose=False)
+        plt.figure()
+        plt.plot((self.maze.get_learning_curve()))
+        plt.title("Latencies")
+        self.maze.plot_Q()
+        plt.show()
+        self.maze.navigation_map(alpha=0)
+        plt.show()
